@@ -1,0 +1,39 @@
+version: "3"
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 8000:8000
+    volumes:
+      - .:/app
+    network_mode: host
+    depends_on:
+      - mysqldb
+
+  mysqldb:
+    image: mysql:latest
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=log
+      - MYSQL_USER=""
+      - MYSQL_PASSWORD=""
+    ports:
+      - 3306:3306
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    network_mode: host
+    depends_on:
+      - app
+    command: sh -c "chmod +x ./test_script.sh && ./test_script.sh"
+
+volumes:
+  mysql-data:

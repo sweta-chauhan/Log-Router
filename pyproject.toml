@@ -1,0 +1,25 @@
+[build-system]
+requires = ["poetry>=1.1.0"]
+build-backend = "poetry.masonry.api"
+
+[tool.poetry]
+name = "log_router"
+version = "0.0.0"
+description = "Log Router"
+authors = ["Sweta Kumari <swetachouhan12101995@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+alembic = "^1.6.5"
+mysqlclient = "^2.1.1"
+marshmallow = "^3.19.0"
+fastapi = "^0.97.0"
+uvicorn = "^0.22.0"
+aiofiles = "^23.1.0"
+sqlalchemy = "^2.0.16"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.2.4"
+darker = "1.7.0"
+isort = "5.11.4"
+pre-commit = "3.1.1"

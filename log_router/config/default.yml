@@ -1,0 +1,1 @@
+mysql_hedwig_read_write:  'mysql://roo@127.0.0.1:3306/log'
