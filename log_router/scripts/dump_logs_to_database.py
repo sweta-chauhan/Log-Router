@@ -14,12 +14,15 @@ from log_router.common.file_handler import (
 from log_router.common.utils import chunks
 from log_router.constant.user_log import (
     ALTERNATE_LOG_FILE,
+    CHUNK_SIZE,
     DATA_DUMP_FILE_SIZE_THRESHOLD,
     DATA_DUMP_INTERVAL,
+    FAILED_INSERTION_LOG_FILE,
     LOG_FILE,
     get_local_dump_path,
 )
 from log_router.models.user_log import UserLogModel
+from log_router.serializor.user_log import UserLogSchema
 
 # Configure the logger
 logging.basicConfig(
@@ -29,12 +32,15 @@ logging.basicConfig(
 
 # Create a logger instance
 logger = logging.getLogger(__name__)
-LOCAL_DUMP_FOLDER = get_local_dump_path(nested=True)
-LOG_FILE = f"{LOCAL_DUMP_FOLDER}{LOG_FILE}"
-ALTERNATE_LOG_FILE = f"{LOCAL_DUMP_FOLDER}{ALTERNATE_LOG_FILE}"
+LOCAL_DUMP_FOLDER = get_local_dump_path(nested=False)
+MAIN_LOG_FILE = f"{LOCAL_DUMP_FOLDER}{LOG_FILE}"
+ALTERNATE_TEMP_LOG_FILE = f"{LOCAL_DUMP_FOLDER}{ALTERNATE_LOG_FILE}"
+FAILED_INSERTION_LOG_FILE = f"{LOCAL_DUMP_FOLDER}{FAILED_INSERTION_LOG_FILE}"
 
 
-def prepare_data_for_dumping_into_database(log_dataset, chunk_size=1000):
+async def prepare_data_for_dumping_into_database(
+    log_dataset, fallback_bath, chunk_size=1000
+):
     chunk_counter = 0
     logger.info("Length of log_dataset : {}".format(log_dataset))
     for log_data_chunk in chunks(log_dataset, chunk_size):
@@ -42,6 +48,7 @@ def prepare_data_for_dumping_into_database(log_dataset, chunk_size=1000):
         logger.info(
             f"Processing Data in chunk size: {chunk_size}, Batch no : {chunk_counter + 1}"
         )
+        chunk_counter += 1
         for log_data in log_data_chunk:
             log_id = log_data.pop("id")
             user_id = log_data["user_id"]
@@ -54,17 +61,34 @@ def prepare_data_for_dumping_into_database(log_dataset, chunk_size=1000):
         logger.info(
             f"Dumping data in chunk size: {chunk_size}, Batch no : {chunk_counter+1} into DB"
         )
-        session = Database().get_session()
-        session.bulk_save_objects(user_log_data_list)
-        session.commit()
-        session.close()
+        try:
+            session = Database().get_session()
+            session.bulk_save_objects(user_log_data_list)
+            session.commit()
+            session.close()
+        except:
+            # dump data with error info to handle fallback
+            await dump_failed_batch_to_fallback_file(fallback_bath, user_log_data_list)
+            pass
 
 
-async def dump_data_to_db_from_file(filename, alternate_file_name, chunk_size=2000):
+async def dump_failed_batch_to_fallback_file(fallback_bath, user_log_data_list):
+    with open(fallback_bath, "a+") as file:
+        data = "\n".join(
+            [UserLogSchema().dumps(user_log) for user_log in user_log_data_list]
+        )
+        file.write(data)
+
+
+async def dump_data_to_db_from_file(
+    filename, alternate_file_name, fallback_bath, chunk_size=2000
+):
     logger.info(f"Reading log from file: {filename}")
     data_for_dumping = read_log_data(filename)
     if data_for_dumping:
-        prepare_data_for_dumping_into_database(data_for_dumping, chunk_size)
+        await prepare_data_for_dumping_into_database(
+            data_for_dumping, fallback_bath, chunk_size
+        )
         logger.info(f"Passing Data for processing in chunk size: {chunk_size}")
         logger.info(f"Now acquiring lock on primary log file: {filename}")
         lock = await acquire_file_lock(filename)
@@ -95,10 +119,11 @@ async def dump_data_to_db_from_file(filename, alternate_file_name, chunk_size=20
                 release_file_lock(lock)
 
 
-def check_conditions(filename):
+def check_conditions(filename, last_time):
     logger.info(f"File name is {filename}")
+    logger.info(f"{filename}")
     if os.path.exists(filename):
-        threshold = time.time() - os.path.getmtime(filename)
+        threshold = abs(last_time - os.path.getmtime(filename))
         logger.info(f"File: {filename} created in {threshold} seconds earlier")
 
         if threshold >= DATA_DUMP_INTERVAL:
@@ -114,25 +139,32 @@ def check_conditions(filename):
 
 
 async def data_dump():
+    last_time = time.time()
     while True:
-        logger.info(
-            "Can be dumped...from main log file? {}".format(check_conditions(LOG_FILE))
-        )
-        logger.info(
-            "Can be dumped...from temp log file? {}".format(
-                check_conditions(ALTERNATE_LOG_FILE)
-            )
-        )
-        if check_conditions(LOG_FILE):
-            await dump_data_to_db_from_file(LOG_FILE, ALTERNATE_LOG_FILE)
-            break
-        if check_conditions(ALTERNATE_LOG_FILE):
+        log_file_flag = check_conditions(MAIN_LOG_FILE, last_time)
+        logger.info(f"Can be dumped...from main log file? {log_file_flag}")
+
+        if log_file_flag:
             await dump_data_to_db_from_file(
-                ALTERNATE_LOG_FILE,
-                LOG_FILE,
+                MAIN_LOG_FILE,
+                ALTERNATE_TEMP_LOG_FILE,
+                FAILED_INSERTION_LOG_FILE,
+                chunk_size=CHUNK_SIZE,
+            )
+
+        temp_log_file_flag = check_conditions(ALTERNATE_TEMP_LOG_FILE, last_time)
+        logger.info(f"Can be dumped...from temp log file? {temp_log_file_flag}")
+
+        if temp_log_file_flag:
+            await dump_data_to_db_from_file(
+                ALTERNATE_TEMP_LOG_FILE,
+                MAIN_LOG_FILE,
+                FAILED_INSERTION_LOG_FILE,
+                chunk_size=CHUNK_SIZE,
             )
             break
-        time.sleep(1)
+        last_time = time.time()
+        time.sleep(30)
 
 
 asyncio.run(data_dump())

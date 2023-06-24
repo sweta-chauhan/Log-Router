@@ -8,6 +8,8 @@ def is_file_locked(file_path):
     try:
         file = open(file_path, "r")
         fcntl.lockf(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        print(f"Lock check .....{file_path}")
+        file.close()
     except IOError as e:
         return True
 
@@ -16,6 +18,8 @@ def is_file_locked(file_path):
 
 async def add_log_data_to_file(filename, alternate_filename, data):
     if os.path.exists(filename):
+        print("Main LOG file is locked....", is_file_locked(filename))
+        print("Temp LOG file is locked...", is_file_locked(alternate_filename))
         if not is_file_locked(filename):
             await data_dump(filename, data)
         else:
@@ -28,7 +32,6 @@ async def data_dump(filename, data):
     lock = await acquire_file_lock(filename)
     try:
         await append_to_file(filename, data, "a+")
-        print("Data dump")
     finally:
         release_file_lock(lock)
 
@@ -36,7 +39,6 @@ async def data_dump(filename, data):
 async def acquire_file_lock(filename):
     directory = os.path.dirname(filename)
     os.makedirs(directory, exist_ok=True)
-    print(directory)
     file = await asyncio.to_thread(open, filename, "a")
     try:
         fcntl.lockf(file, fcntl.LOCK_EX)
@@ -53,7 +55,6 @@ def release_file_lock(file):
 
 async def append_to_file(filename, data, mode="a+"):
     with open(filename, mode) as file:
-        print(data)
         file.write(data + "\n")
 
 

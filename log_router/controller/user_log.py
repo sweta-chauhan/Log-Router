@@ -9,7 +9,7 @@ from log_router.constant.user_log import (
     LOG_FILE,
     get_local_dump_path,
 )
-from log_router.serializor.user_log import UserLogSchema
+from log_router.serializor.user_log import UserLogRequestSchema
 
 
 class LogPayload(BaseModel):
@@ -29,8 +29,8 @@ class UserLog:
     async def post(request: LogPayload):
         try:
             request_body = request.json()
-            UserLogSchema().loads(request_body)
-            # logic to right data in file buffer or in event stream
+            UserLogRequestSchema().loads(request_body)
+            # logic to write data in file buffer or in event stream
 
             await add_log_data_to_file(LOG_FILE, ALTERNATE_LOG_FILE, request_body)
             return JSONResponse(
